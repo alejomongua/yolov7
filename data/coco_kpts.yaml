@@ -1,10 +1,34 @@
 # train and val data as 1) directory: path/images/, 2) file: path/images.txt, or 3) list: [path1/images/, path2/images/]
-train: ../coco_kpts/train2017.txt  # 118287 images
-val: ../coco_kpts/val2017.txt  # 5000 images
+train: ../coco_kpts/train2017.txt # 118287 images
+val: ../coco_kpts/val2017.txt # 5000 images
 #val: /user/a0132471/Files/bit-bucket/pytorch/jacinto-ai-pytest/data/results/datasets/pytorch_coco_mmdet_img_resize640_val2017_5k_yolov5.txt
-test: ../coco_kpts/test-dev2017.txt  # 20288 of 40670 images, submit to https://competitions.codalab.org/competitions/20794
+test: ../coco_kpts/test-dev2017.txt # 20288 of 40670 images, submit to https://competitions.codalab.org/competitions/20794
 
 # number of classes
 nc: 1
 
-names: [ 'person']
+names: ["person"]
+
+# keypoint configuration
+kpt_shape: [17, 3]
+kpt_flip_index: [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
+oks_sigmas:
+  [
+    0.026,
+    0.025,
+    0.025,
+    0.035,
+    0.035,
+    0.079,
+    0.079,
+    0.072,
+    0.072,
+    0.062,
+    0.062,
+    0.107,
+    0.107,
+    0.087,
+    0.087,
+    0.089,
+    0.089,
+  ]
