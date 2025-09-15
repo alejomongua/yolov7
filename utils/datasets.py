@@ -104,6 +104,7 @@ def create_dataloader(
     tidl_load=False,
     kpt_label=False,
     data_dict=None,
+    drop_kpt_visibility=False,
 ):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
@@ -123,6 +124,7 @@ def create_dataloader(
             tidl_load=tidl_load,
             kpt_label=kpt_label,
             data_dict=data_dict,
+            drop_kpt_visibility=drop_kpt_visibility,
         )
 
     batch_size = min(batch_size, len(dataset))
@@ -451,6 +453,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         tidl_load=False,
         kpt_label=True,
         data_dict=None,
+        drop_kpt_visibility=False,
     ):
         self.img_size = img_size
         self.augment = augment
@@ -466,6 +469,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.stride = stride
         self.path = path
         self.kpt_label = kpt_label
+        self.drop_kpt_visibility = drop_kpt_visibility
 
         # Initialize keypoint parameters from data_dict or defaults
         if data_dict is None:
@@ -679,9 +683,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                     "non-normalized or out of bounds coordinate labels"
                                 )
                             # print("l shape", l.shape)
+                            # Visibility dimension preserved; previous stripping removed for dynamic K,D training
                             if (
-                                self.kpt_D == 3
-                            ):  # Remove occlusion parameter (visibility) from GT
+                                self.kpt_D == 3 and self.drop_kpt_visibility
+                            ):  # Remove occlusion parameter (visibility) from GT only if explicitly enabled
                                 kpts_without_vis = np.zeros(
                                     (l.shape[0], 5 + self.kpt_K * 2)
                                 )
@@ -708,7 +713,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         if kpt_label:
                             empty_cols = (
                                 5 + self.kpt_K * 2
-                                if self.kpt_D == 3
+                                if self.kpt_D == 3 and self.drop_kpt_visibility
                                 else 5 + self.kpt_K * self.kpt_D
                             )
                             l = np.zeros((0, empty_cols), dtype=np.float32)
@@ -720,7 +725,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     if kpt_label:
                         empty_cols = (
                             5 + self.kpt_K * 2
-                            if self.kpt_D == 3
+                            if self.kpt_D == 3 and self.drop_kpt_visibility
                             else 5 + self.kpt_K * self.kpt_D
                         )
                         l = np.zeros((0, empty_cols), dtype=np.float32)
@@ -835,8 +840,24 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             labels[:, [2, 4]] /= img.shape[0]  # normalized height 0-1
             labels[:, [1, 3]] /= img.shape[1]  # normalized width 0-1
             if self.kpt_label:
-                labels[:, 6::2] /= img.shape[0]  # normalized kpt heights 0-1
-                labels[:, 5::2] /= img.shape[1]  # normalized kpt width 0-1
+                # Handle dynamic keypoint dimensions
+                kpt_start_idx = 5
+                if self.kpt_D == 3 and not self.drop_kpt_visibility:
+                    # Full (x,y,v) triplets - normalize x,y coordinates only
+                    labels[:, kpt_start_idx + 1 :: 3] /= img.shape[
+                        0
+                    ]  # normalized kpt heights 0-1
+                    labels[:, kpt_start_idx::3] /= img.shape[
+                        1
+                    ]  # normalized kpt width 0-1
+                else:
+                    # Either 2D coordinates or visibility stripped - normalize alternating x,y
+                    labels[:, kpt_start_idx + 1 :: 2] /= img.shape[
+                        0
+                    ]  # normalized kpt heights 0-1
+                    labels[:, kpt_start_idx::2] /= img.shape[
+                        1
+                    ]  # normalized kpt width 0-1
 
         if self.augment:
             # flip up-down
@@ -845,7 +866,17 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 if nL:
                     labels[:, 2] = 1 - labels[:, 2]
                     if self.kpt_label:
-                        labels[:, 6::2] = (1 - labels[:, 6::2]) * (labels[:, 6::2] != 0)
+                        kpt_start_idx = 5
+                        if self.kpt_D == 3 and not self.drop_kpt_visibility:
+                            # Full (x,y,v) triplets
+                            labels[:, kpt_start_idx + 1 :: 3] = (
+                                1 - labels[:, kpt_start_idx + 1 :: 3]
+                            ) * (labels[:, kpt_start_idx + 1 :: 3] != 0)
+                        else:
+                            # Either 2D coordinates or visibility stripped
+                            labels[:, kpt_start_idx + 1 :: 2] = (
+                                1 - labels[:, kpt_start_idx + 1 :: 2]
+                            ) * (labels[:, kpt_start_idx + 1 :: 2] != 0)
 
             # flip left-right
             if random.random() < hyp["fliplr"]:
@@ -853,16 +884,36 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 if nL:
                     labels[:, 1] = 1 - labels[:, 1]
                     if self.kpt_label:
-                        labels[:, 5::2] = (1 - labels[:, 5::2]) * (labels[:, 5::2] != 0)
-                        labels[:, 5::2] = labels[:, 5::2][:, self.flip_index]
-                        labels[:, 6::2] = labels[:, 6::2][:, self.flip_index]
+                        kpt_start_idx = 5
+                        if self.kpt_D == 3 and not self.drop_kpt_visibility:
+                            # Full (x,y,v) triplets
+                            labels[:, kpt_start_idx::3] = (
+                                1 - labels[:, kpt_start_idx::3]
+                            ) * (labels[:, kpt_start_idx::3] != 0)
+                            labels[:, kpt_start_idx::3] = labels[:, kpt_start_idx::3][
+                                :, self.flip_index
+                            ]
+                            labels[:, kpt_start_idx + 1 :: 3] = labels[
+                                :, kpt_start_idx + 1 :: 3
+                            ][:, self.flip_index]
+                        else:
+                            # Either 2D coordinates or visibility stripped
+                            labels[:, kpt_start_idx::2] = (
+                                1 - labels[:, kpt_start_idx::2]
+                            ) * (labels[:, kpt_start_idx::2] != 0)
+                            labels[:, kpt_start_idx::2] = labels[:, kpt_start_idx::2][
+                                :, self.flip_index
+                            ]
+                            labels[:, kpt_start_idx + 1 :: 2] = labels[
+                                :, kpt_start_idx + 1 :: 2
+                            ][:, self.flip_index]
 
-        num_kpts = (labels.shape[1] - 5) // 2
-        labels_out = (
-            torch.zeros((nL, 6 + 2 * num_kpts))
-            if self.kpt_label
-            else torch.zeros((nL, 6))
-        )
+        if self.kpt_label:
+            # Dynamic width allocation based on actual label width
+            label_w = labels.shape[1]
+            labels_out = torch.zeros((nL, 1 + label_w))
+        else:
+            labels_out = torch.zeros((nL, 6))
         if nL:
             if self.kpt_label:
                 labels_out[:, 1:] = torch.from_numpy(labels)
@@ -879,9 +930,25 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     @staticmethod
     def collate_fn(batch):
         img, label, path, shapes = zip(*batch)  # transposed
-        for i, l in enumerate(label):
-            l[:, 0] = i  # add target image index for build_targets()
-        return torch.stack(img, 0), torch.cat(label, 0), path, shapes
+        # Dynamic width allocation - get the width from the first non-empty label
+        nL = sum([len(l) for l in label])
+        if nL > 0:
+            # Find the first non-empty label to get width
+            label_w = next(l.shape[1] for l in label if len(l) > 0)
+            labels_out = torch.zeros((nL, label_w), dtype=torch.float32)
+
+            # Fill the output tensor
+            start_idx = 0
+            for i, l in enumerate(label):
+                if len(l) > 0:
+                    end_idx = start_idx + len(l)
+                    labels_out[start_idx:end_idx, 0] = i  # add target image index
+                    labels_out[start_idx:end_idx, 1:] = l[:, 1:]  # copy ALL columns
+                    start_idx = end_idx
+            return torch.stack(img, 0), labels_out, path, shapes
+        else:
+            # No labels in batch
+            return torch.stack(img, 0), torch.zeros((0, 6)), path, shapes
 
     @staticmethod
     def collate_fn4(batch):
