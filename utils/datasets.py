@@ -1382,35 +1382,67 @@ def random_perspective(
             new[:, [0, 2]] = new[:, [0, 2]].clip(0, width)
             new[:, [1, 3]] = new[:, [1, 3]].clip(0, height)
             if kpt_label:
-                # Get dataset reference to access kpt_K - need to pass this from caller
-                # For now, detect K from targets shape
-                kpt_cols = targets.shape[1] - 5  # Total keypoint columns
-                K = kpt_cols // 2  # Number of keypoints (assuming 2D coordinates)
+                # Dynamic K,D computation from label width
+                n = targets.shape[0]
+                label_w = targets.shape[1]
+                no_kpt = max(label_w - 5, 0)
 
-                xy_kpts = np.ones((n * K, 3))
-                xy_kpts[:, :2] = targets[:, 5:].reshape(
-                    n * K, 2
-                )  # dynamic num_kpt based on detected K
+                # Determine D from target shape - robust fallback logic
+                D = 3  # Default assumption
+                if no_kpt % 3 == 0:
+                    D = 3  # Assume visibility present when divisible by 3
+                elif no_kpt % 2 == 0:
+                    D = 2  # xy-only when divisible by 2
+                else:
+                    # Non-standard layout, try to infer
+                    D = 3 if no_kpt >= 3 else 2
+
+                K = no_kpt // D
+
+                # Add assertion to guard against malformed labels
+                assert (label_w - 5) % D == 0, (
+                    f"Label width {label_w} not compatible with D={D}"
+                )
+
+                kpts = targets[:, 5 : 5 + no_kpt].copy().reshape(n, K, D)
+
+                # Build (x,y,mask) rows for perspective transform
+                xy = kpts[..., :2].reshape(n * K, 2)
+                if D >= 3:
+                    vis = (kpts[..., 2] > 0).astype(np.float32).reshape(n * K, 1)
+                else:
+                    vis = np.ones((n * K, 1), dtype=np.float32)
+
+                xy_kpts = np.concatenate([xy, vis], axis=1)  # (n*K, 3)
+
+                # Apply perspective transform to xy_kpts
                 xy_kpts = xy_kpts @ M.T  # transform
                 xy_kpts = (
                     xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]
-                ).reshape(n, K * 2)  # perspective rescale or affine
-                xy_kpts[targets[:, 5:] == 0] = 0
-                x_kpts = xy_kpts[:, list(range(0, K * 2, 2))]
-                y_kpts = xy_kpts[:, list(range(1, K * 2, 2))]
+                )  # perspective rescale or affine
 
-                x_kpts[
-                    np.logical_or.reduce(
-                        (x_kpts < 0, x_kpts > width, y_kpts < 0, y_kpts > height)
+                # Update visibility mask for points that go out of bounds
+                new_xy = xy_kpts[:, :2]  # (n*K, 2)
+                new_vis_mask = np.ones((n * K,), dtype=np.float32)
+
+                # Zero out coordinates that go out of bounds
+                out_of_bounds = np.logical_or.reduce(
+                    (
+                        new_xy[:, 0] < 0,
+                        new_xy[:, 0] > width,
+                        new_xy[:, 1] < 0,
+                        new_xy[:, 1] > height,
                     )
-                ] = 0
-                y_kpts[
-                    np.logical_or.reduce(
-                        (x_kpts < 0, x_kpts > width, y_kpts < 0, y_kpts > height)
-                    )
-                ] = 0
-                xy_kpts[:, list(range(0, K * 2, 2))] = x_kpts
-                xy_kpts[:, list(range(1, K * 2, 2))] = y_kpts
+                )
+                new_xy[out_of_bounds] = 0
+                new_vis_mask[out_of_bounds] = 0
+
+                # Write back to targets
+                kpts[..., :2] = new_xy.reshape(n, K, 2)
+                if D >= 3:
+                    kpts[..., 2] = kpts[..., 2] * new_vis_mask.reshape(n, K)
+
+                targets[:, 5 : 5 + no_kpt] = kpts.reshape(n, no_kpt)
 
         # filter candidates
         i = box_candidates(
@@ -1420,8 +1452,7 @@ def random_perspective(
         )
         targets = targets[i]
         targets[:, 1:5] = new[i]
-        if kpt_label:
-            targets[:, 5:] = xy_kpts[i]
+        # No need to update kpt columns as they're already updated in targets
 
     return img, targets
 
