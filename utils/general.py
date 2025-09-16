@@ -863,7 +863,9 @@ def strip_optimizer(
     except:
         # If it fails, add safe globals and try with weights_only=False
         import torch.serialization
-        torch.serialization.add_safe_globals([models.yolo.Model])
+        # Import models.yolo here to avoid NameError
+        from models import yolo
+        torch.serialization.add_safe_globals([yolo.Model])
         x = torch.load(f, map_location=torch.device("cpu"), weights_only=False)
     if x.get("ema"):
         x["model"] = x["ema"]  # replace model with ema
