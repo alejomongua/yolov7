@@ -147,17 +147,24 @@ def test(data,
                 elif hasattr(model, 'module') and hasattr(model.module, 'kpt_dim'):
                     kpt_dim = model.module.kpt_dim
                 
-                # Number of keypoints
-                nkpt = (targets.shape[1] - 2) // kpt_dim
+                # The number of elements after the first two (class index and obj)
+                num_kpt_values = targets.shape[1] - 2
                 
-                # Create scaling array
+                # Create scaling array - scale x and y coordinates, leave visibility unchanged
                 scale_array = []
-                for _ in range(nkpt):
-                    scale_array.append(width)  # scale x
-                    scale_array.append(height) # scale y
-                    # Add 1.0 for visibility and any additional dimensions
-                    for _ in range(kpt_dim - 2):
+                for i in range(num_kpt_values):
+                    # Every kpt_dim-th element starting at index 0 is x (scale by width)
+                    if i % kpt_dim == 0:
+                        scale_array.append(width)
+                    # Every kpt_dim-th element starting at index 1 is y (scale by height)
+                    elif i % kpt_dim == 1:
+                        scale_array.append(height)
+                    # All other elements (visibility scores) are scaled by 1.0 (unchanged)
+                    else:
                         scale_array.append(1.0)
+                
+                # Ensure scale_array has the correct length
+                assert len(scale_array) == num_kpt_values, f"Scale array length {len(scale_array)} doesn't match number of keypoint values {num_kpt_values}"
                 
                 targets[:, 2:] *= torch.Tensor(scale_array).to(device)  # to pixels
             else:
