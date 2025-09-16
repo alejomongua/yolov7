@@ -857,7 +857,14 @@ def strip_optimizer(
     f="best.pt", s=""
 ):  # from utils.general import *; strip_optimizer()
     # Strip optimizer from 'f' to finalize training, optionally save as 's'
-    x = torch.load(f, map_location=torch.device("cpu"))
+    try:
+        # Try to load with weights_only=True first
+        x = torch.load(f, map_location=torch.device("cpu"), weights_only=True)
+    except:
+        # If it fails, add safe globals and try with weights_only=False
+        import torch.serialization
+        torch.serialization.add_safe_globals([models.yolo.Model])
+        x = torch.load(f, map_location=torch.device("cpu"), weights_only=False)
     if x.get("ema"):
         x["model"] = x["ema"]  # replace model with ema
     for k in "optimizer", "training_results", "wandb_id", "ema", "updates":  # keys
