@@ -62,7 +62,8 @@ logger = logging.getLogger(__name__)
 
 def train(hyp, opt, device, tb_writer=None):
     logger.info(
-        colorstr("hyperparameters: ") + ", ".join(f"{k}={v}" for k, v in hyp.items())
+        colorstr("hyperparameters: ") +
+        ", ".join(f"{k}={v}" for k, v in hyp.items())
     )
     save_dir, epochs, batch_size, total_batch_size, weights, rank, kpt_label = (
         Path(opt.save_dir),
@@ -136,7 +137,8 @@ def train(hyp, opt, device, tb_writer=None):
             opt.cfg or ckpt["model"].yaml, ch=3, nc=nc, anchors=hyp.get("anchors")
         ).to(device)  # create
         exclude = (
-            ["anchor"] if (opt.cfg or hyp.get("anchors")) and not opt.resume else []
+            ["anchor"] if (opt.cfg or hyp.get("anchors")
+                           ) and not opt.resume else []
         )  # exclude keys
         state_dict = ckpt["model"].float().state_dict()  # to FP32
         state_dict = intersect_dicts(
@@ -169,7 +171,8 @@ def train(hyp, opt, device, tb_writer=None):
     accumulate = max(
         round(nbs / total_batch_size), 1
     )  # accumulate loss before optimizing
-    hyp["weight_decay"] *= total_batch_size * accumulate / nbs  # scale weight_decay
+    hyp["weight_decay"] *= total_batch_size * \
+        accumulate / nbs  # scale weight_decay
     logger.info(f"Scaled weight_decay = {hyp['weight_decay']}")
 
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -241,7 +244,8 @@ def train(hyp, opt, device, tb_writer=None):
 
         # Results
         if ckpt.get("training_results") is not None:
-            results_file.write_text(ckpt["training_results"])  # write results.txt
+            results_file.write_text(
+                ckpt["training_results"])  # write results.txt
 
         # Epochs
         start_epoch = ckpt["epoch"] + 1
@@ -261,7 +265,8 @@ def train(hyp, opt, device, tb_writer=None):
 
     # Image sizes
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
-    nl = model.model[-1].nl  # number of detection layers (used for scaling hyp['obj'])
+    # number of detection layers (used for scaling hyp['obj'])
+    nl = model.model[-1].nl
     imgsz, imgsz_test = [
         check_img_size(x, gs) for x in opt.img_size
     ]  # verify imgsz are gs-multiples
@@ -334,7 +339,8 @@ def train(hyp, opt, device, tb_writer=None):
 
             # Anchors
             if not opt.noautoanchor:
-                check_anchors(dataset, model=model, thr=hyp["anchor_t"], imgsz=imgsz)
+                check_anchors(dataset, model=model,
+                              thr=hyp["anchor_t"], imgsz=imgsz)
             model.half().float()  # pre-reduce anchor precision
 
     # DDP mode
@@ -352,7 +358,8 @@ def train(hyp, opt, device, tb_writer=None):
     # Model parameters
     hyp["box"] *= 3.0 / nl  # scale to layers
     hyp["cls"] *= nc / 80.0 * 3.0 / nl  # scale to classes and layers
-    hyp["obj"] *= (imgsz / 640) ** 2 * 3.0 / nl  # scale to image size and layers
+    hyp["obj"] *= (imgsz / 640) ** 2 * 3.0 / \
+        nl  # scale to image size and layers
     hyp["label_smoothing"] = opt.label_smoothing
     model.nc = nc  # attach number of classes to model
     model.hyp = hyp  # attach hyperparameters to model
@@ -400,7 +407,8 @@ def train(hyp, opt, device, tb_writer=None):
     )  # number of warmup iterations, max(3 epochs, 1k iterations)
     # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
     maps = np.zeros(nc)  # mAP per class
-    results = (0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
+    # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
+    results = (0, 0, 0, 0, 0, 0, 0)
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = amp.GradScaler(enabled=cuda)
     compute_loss = ComputeLoss(model, kpt_label=kpt_label)  # init loss class
@@ -473,7 +481,8 @@ def train(hyp, opt, device, tb_writer=None):
         ):  # batch -------------------------------------------------------------
             # if i>10:
             #     break
-            ni = i + nb * epoch  # number integrated batches (since train start)
+            # number integrated batches (since train start)
+            ni = i + nb * epoch
             imgs = (
                 imgs.to(device, non_blocking=True).float() / 255.0
             )  # uint8 to float32, 0-255 to 0.0-1.0
@@ -502,7 +511,8 @@ def train(hyp, opt, device, tb_writer=None):
 
             # Multi-scale
             if opt.multi_scale:
-                sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
+                sz = random.randrange(
+                    imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
                 sf = sz / max(imgs.shape[2:])  # scale factor
                 if sf != 1:
                     ns = [
@@ -538,7 +548,8 @@ def train(hyp, opt, device, tb_writer=None):
 
             # Print
             if rank in [-1, 0]:
-                mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
+                mloss = (mloss * i + loss_items) / \
+                    (i + 1)  # update mean losses
                 mem = "%.3gG" % (
                     torch.cuda.memory_reserved() / 1e9
                     if torch.cuda.is_available()
@@ -565,7 +576,8 @@ def train(hyp, opt, device, tb_writer=None):
                     wandb_logger.log(
                         {
                             "Mosaics": [
-                                wandb_logger.wandb.Image(str(x), caption=x.name)
+                                wandb_logger.wandb.Image(
+                                    str(x), caption=x.name)
                                 for x in save_dir.glob("train*.jpg")
                                 if x.exists()
                             ]
@@ -584,7 +596,8 @@ def train(hyp, opt, device, tb_writer=None):
             # mAP
             ema.update_attr(
                 model,
-                include=["yaml", "nc", "hyp", "gr", "names", "stride", "class_weights"],
+                include=["yaml", "nc", "hyp", "gr",
+                         "names", "stride", "class_weights"],
             )
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
@@ -607,7 +620,8 @@ def train(hyp, opt, device, tb_writer=None):
 
             # Write
             with open(results_file, "a") as f:
-                f.write(s + "%10.4g" * 7 % results + "\n")  # append metrics, val_loss
+                # append metrics, val_loss
+                f.write(s + "%10.4g" * 7 % results + "\n")
             if len(opt.name) and opt.bucket:
                 os.system(
                     "gsutil cp %s gs://%s/results/results%s.txt"
@@ -689,7 +703,8 @@ def train(hyp, opt, device, tb_writer=None):
                 wandb_logger.log(
                     {
                         "Results": [
-                            wandb_logger.wandb.Image(str(save_dir / f), caption=f)
+                            wandb_logger.wandb.Image(
+                                str(save_dir / f), caption=f)
                             for f in files
                             if (save_dir / f).exists()
                         ]
@@ -742,7 +757,7 @@ def train(hyp, opt, device, tb_writer=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--weights", type=str, default="yolov5s.pt", help="initial weights path"
+        "--weights", type=str, default="", help="initial weights path"
     )
     parser.add_argument("--cfg", type=str, default="", help="model.yaml path")
     parser.add_argument(
@@ -762,7 +777,8 @@ if __name__ == "__main__":
         default=[640, 640],
         help="[train, test] image sizes",
     )
-    parser.add_argument("--rect", action="store_true", help="rectangular training")
+    parser.add_argument("--rect", action="store_true",
+                        help="rectangular training")
     parser.add_argument(
         "--resume",
         nargs="?",
@@ -773,11 +789,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--nosave", action="store_true", help="only save final checkpoint"
     )
-    parser.add_argument("--notest", action="store_true", help="only test final epoch")
+    parser.add_argument("--notest", action="store_true",
+                        help="only test final epoch")
     parser.add_argument(
         "--noautoanchor", action="store_true", help="disable autoanchor check"
     )
-    parser.add_argument("--evolve", action="store_true", help="evolve hyperparameters")
+    parser.add_argument("--evolve", action="store_true",
+                        help="evolve hyperparameters")
     parser.add_argument("--bucket", type=str, default="", help="gsutil bucket")
     parser.add_argument(
         "--cache-images", action="store_true", help="cache images for faster training"
@@ -812,7 +830,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--workers", type=int, default=8, help="maximum number of dataloader workers"
     )
-    parser.add_argument("--project", default="runs/train", help="save to project/name")
+    parser.add_argument("--project", default="runs/train",
+                        help="save to project/name")
     parser.add_argument("--entity", default=None, help="W&B entity")
     parser.add_argument("--name", default="exp", help="save to project/name")
     parser.add_argument(
@@ -854,7 +873,8 @@ if __name__ == "__main__":
     opt = parser.parse_args()
 
     # Set DDP variables
-    opt.world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+    opt.world_size = int(os.environ["WORLD_SIZE"]
+                         ) if "WORLD_SIZE" in os.environ else 1
     opt.global_rank = int(os.environ["RANK"]) if "RANK" in os.environ else -1
     set_logging(opt.global_rank)
     if opt.global_rank in [-1, 0]:
@@ -867,7 +887,8 @@ if __name__ == "__main__":
         ckpt = (
             opt.resume if isinstance(opt.resume, str) else get_latest_run()
         )  # specified or most recent path
-        assert os.path.isfile(ckpt), "ERROR: --resume checkpoint does not exist"
+        assert os.path.isfile(
+            ckpt), "ERROR: --resume checkpoint does not exist"
         apriori = opt.global_rank, opt.local_rank
         with open(Path(ckpt).parent.parent / "opt.yaml") as f:
             opt = argparse.Namespace(**yaml.safe_load(f))  # replace
@@ -935,8 +956,10 @@ if __name__ == "__main__":
     else:
         # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
         meta = {
-            "lr0": (1, 1e-5, 1e-1),  # initial learning rate (SGD=1E-2, Adam=1E-3)
-            "lrf": (1, 0.01, 1.0),  # final OneCycleLR learning rate (lr0 * lrf)
+            # initial learning rate (SGD=1E-2, Adam=1E-3)
+            "lr0": (1, 1e-5, 1e-1),
+            # final OneCycleLR learning rate (lr0 * lrf)
+            "lrf": (1, 0.01, 1.0),
             "momentum": (0.3, 0.6, 0.98),  # SGD momentum/Adam beta1
             "weight_decay": (1, 0.0, 0.001),  # optimizer weight decay
             "warmup_epochs": (1, 0.0, 5.0),  # warmup epochs (fractions ok)
@@ -956,7 +979,8 @@ if __name__ == "__main__":
                 2.0,
             ),  # focal loss gamma (efficientDet default gamma=1.5)
             "hsv_h": (1, 0.0, 0.1),  # image HSV-Hue augmentation (fraction)
-            "hsv_s": (1, 0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
+            # image HSV-Saturation augmentation (fraction)
+            "hsv_s": (1, 0.0, 0.9),
             "hsv_v": (1, 0.0, 0.9),  # image HSV-Value augmentation (fraction)
             "degrees": (1, 0.0, 45.0),  # image rotation (+/- deg)
             "translate": (1, 0.0, 0.9),  # image translation (+/- fraction)
@@ -976,7 +1000,8 @@ if __name__ == "__main__":
         assert opt.local_rank == -1, "DDP mode not implemented for --evolve"
         opt.notest, opt.nosave = True, True  # only test/save final epoch
         # ei = [isinstance(x, (int, float)) for x in hyp.values()]  # evolvable indices
-        yaml_file = Path(opt.save_dir) / "hyp_evolved.yaml"  # save best result here
+        yaml_file = Path(opt.save_dir) / \
+            "hyp_evolved.yaml"  # save best result here
         if opt.bucket:
             os.system(
                 "gsutil cp gs://%s/evolve.txt ." % opt.bucket
@@ -994,9 +1019,11 @@ if __name__ == "__main__":
                 w = fitness(x) - fitness(x).min()  # weights
                 if parent == "single" or len(x) == 1:
                     # x = x[random.randint(0, n - 1)]  # random selection
-                    x = x[random.choices(range(n), weights=w)[0]]  # weighted selection
+                    x = x[random.choices(range(n), weights=w)[
+                        0]]  # weighted selection
                 elif parent == "weighted":
-                    x = (x * w.reshape(n, 1)).sum(0) / w.sum()  # weighted combination
+                    x = (x * w.reshape(n, 1)).sum(0) / \
+                        w.sum()  # weighted combination
 
                 # Mutate
                 mp, s = 0.8, 0.2  # mutation probability, sigma
@@ -1007,7 +1034,8 @@ if __name__ == "__main__":
                 v = np.ones(ng)
                 while all(v == 1):  # mutate until a change occurs (prevent duplicates)
                     v = (
-                        g * (npr.random(ng) < mp) * npr.randn(ng) * npr.random() * s + 1
+                        g * (npr.random(ng) < mp) *
+                        npr.randn(ng) * npr.random() * s + 1
                     ).clip(0.3, 3.0)
                 for i, k in enumerate(hyp.keys()):  # plt.hist(v.ravel(), 300)
                     hyp[k] = float(x[i + 7] * v[i])  # mutate
