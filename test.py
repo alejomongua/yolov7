@@ -140,8 +140,26 @@ def test(data,
 
             # Run NMS
             if kpt_label:
-                num_points = (targets.shape[1]//2 - 1)
-                targets[:, 2:] *= torch.Tensor([width, height]*num_points).to(device)  # to pixels
+                # Get keypoint dimension from model if available
+                kpt_dim = 3  # default to 3 (x, y, visibility)
+                if hasattr(model, 'kpt_dim'):
+                    kpt_dim = model.kpt_dim
+                elif hasattr(model, 'module') and hasattr(model.module, 'kpt_dim'):
+                    kpt_dim = model.module.kpt_dim
+                
+                # Number of keypoints
+                nkpt = (targets.shape[1] - 2) // kpt_dim
+                
+                # Create scaling array
+                scale_array = []
+                for _ in range(nkpt):
+                    scale_array.append(width)  # scale x
+                    scale_array.append(height) # scale y
+                    # Add 1.0 for visibility and any additional dimensions
+                    for _ in range(kpt_dim - 2):
+                        scale_array.append(1.0)
+                
+                targets[:, 2:] *= torch.Tensor(scale_array).to(device)  # to pixels
             else:
                 targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
             lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
